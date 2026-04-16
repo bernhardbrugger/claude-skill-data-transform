@@ -1,0 +1,20 @@
+{
+  "name": "data-transform",
+  "description": "Universal data format converter — CSV, JSON, SQL, YAML, Markdown, TOML, NDJSON. Handles type inference, null normalization, nested-object flattening, array explosion, schema inference, and large-file streaming. No external dependencies required.",
+  "version": "1.0.0",
+  "author": {
+    "name": "bernhardbrugger",
+    "url": "https://github.com/bernhardbrugger/claude-skill-data-transform"
+  },
+  "keywords": [
+    "data",
+    "csv",
+    "json",
+    "sql",
+    "yaml",
+    "transform",
+    "convert",
+    "schema",
+    "etl"
+  ]
+}

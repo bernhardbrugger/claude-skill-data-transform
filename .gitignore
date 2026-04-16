@@ -1,0 +1,19 @@
+# Claude Code local settings (may contain personal config)
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Packaging output
+*.skill
