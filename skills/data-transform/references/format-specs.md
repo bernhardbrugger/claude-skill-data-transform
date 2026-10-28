@@ -61,7 +61,10 @@ By default, array values are JSON-stringified into a single cell when converting
 Use `--explode FIELD` to produce one row per array element:
 ```bash
 transform.py orders.json --to csv --explode items
+transform.py orders.json --to csv --flatten --explode customer__tags   # nested path
 ```
+
+An empty array keeps the row (the field becomes null), so no row disappears silently.
 
 ### Large JSON arrays
 For JSON files over ~50 MB, prefer NDJSON (one JSON object per line) so `--stream` works.
@@ -172,7 +175,7 @@ GitHub, GitLab, VS Code preview, Obsidian, Notion, Confluence.
 TOML 1.0 has no null type. Columns with `None` values are **omitted** from the TOML output for that record.
 
 ### Output structure
-Each row becomes an `[[record]]` array-of-tables entry. Column names with special characters are double-quoted.
+Each row becomes an `[[record]]` array-of-tables entry. Keys are always double-quoted. Nested objects are written as TOML inline tables (`{ "name" = "Anna" }` style), arrays as TOML arrays, and strings are escaped (quotes, backslashes, newlines, control characters), so the output parses with any TOML 1.0 parser.
 
 ### TOML is suitable for
 Config files, small reference tables. It is **not** suitable for large datasets — use JSON or CSV instead.

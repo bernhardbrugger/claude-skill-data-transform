@@ -11,7 +11,7 @@ description: >
   "generate CREATE TABLE from my data", "find null values", or "validate data structure".
   Use this skill any time a user pastes data and wants it in a different format — even if they
   just say "can you turn this into JSON" or "make this a table" without naming a specific format.
-version: 1.0.0
+version: 1.1.0
 ---
 
 # Data Transform
@@ -68,9 +68,9 @@ cat records.ndjson | python scripts/transform.py --from ndjson --to csv
 | `--null-values` | `null,NULL,N/A,…` | Comma-separated strings to treat as NULL |
 | `--flatten` | false | Recursively flatten nested JSON objects |
 | `--sep` | `__` | Key separator for flattened paths (e.g. `address__city`) |
-| `--explode FIELD` | — | Expand array field: one row per element |
+| `--explode FIELD` | — | Expand array field: one row per element. Also accepts a nested path (`user__tags` or `user.tags`); an empty array keeps the row with the field set to null. Runs before `--flatten` |
 | `--no-infer` | false | Keep all values as strings (skip type inference) |
-| `--stream` | false | Stream output; avoids loading full file into memory |
+| `--stream` | false | Write rows as they are read (CSV/TSV/NDJSON output). CSV/TSV/NDJSON input is read row by row; JSON/YAML input is still parsed whole. CSV columns come from the first row (a warning lists columns dropped later) |
 | `--pretty` | false | Pretty-print JSON output |
 | `--encoding` | auto | Force input encoding (e.g. `latin-1`, `cp1252`) |
 | `-o FILE` | stdout | Write output to file instead of stdout |
@@ -116,7 +116,7 @@ double-underscore column names (`address__city`, `address__zip`).
 
 **One row per order item** — use `--explode items` where `items` is the array field name.
 
-**Files > 100 MB** — use `--stream`. Supported for NDJSON and CSV output formats.
+**Files > 100 MB** — use `--stream` with NDJSON/CSV input and NDJSON/CSV output. Convert big JSON arrays to NDJSON first, because JSON input is parsed as a whole.
 
 **PostgreSQL COPY format** — use `--dialect postgres` with `--to csv` then import with
 `\COPY tablename FROM 'file.csv' CSV HEADER;`.
@@ -127,8 +127,8 @@ When `--no-infer` is not set, string values are parsed in this order:
 
 1. **NULL** — value is in the `--null-values` list or is an empty string → `None`
 2. **Boolean** — case-insensitive `true/false/yes/no/on/off` → `True`/`False`
-3. **Integer** — parseable as int, no leading zeros (e.g. `007` stays as string) → `int`
-4. **Float** — parseable as float (including scientific notation `1e5`) → `float`
+3. **Integer** — plain ASCII digits, optional sign, no leading zeros (`007` and ZIP codes like `01234` stay strings, as does `1_000`) → `int`
+4. **Float** — decimal or scientific notation (`41.5`, `1e5`, `.5`) → `float`. `nan` and `inf` stay strings, because they are not valid JSON numbers
 5. **String** — everything else
 
 SQL output promotes types per column: if a column has mixed int and float values,

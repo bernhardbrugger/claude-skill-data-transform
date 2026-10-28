@@ -38,6 +38,13 @@ _DATE_RE = [
     re.compile(r"^\d{4}/\d{2}/\d{2}$"),
 ]
 
+# Numbers: no leading zeros, ASCII digits only, no nan/inf (kept in sync with transform.py)
+_INT_RE = re.compile(r"^[+-]?(?:0|[1-9][0-9]*)$", re.ASCII)
+_FLOAT_RE = re.compile(
+    r"^[+-]?(?:(?:0|[1-9][0-9]*)\.[0-9]*|\.[0-9]+|(?:0|[1-9][0-9]*)(?=[eE]))(?:[eE][+-]?[0-9]+)?$",
+    re.ASCII,
+)
+
 # Type promotion order: higher index = more general
 _PROMOTE = ["null", "boolean", "integer", "number", "string"]
 
@@ -70,16 +77,12 @@ def _classify(val: Any) -> str:
     lo = s.lower()
     if lo in ("true", "false", "yes", "no", "on", "off"):
         return "boolean"
-    try:
-        int(s)
+    # Same strict number syntax as transform.py: "01234" (ZIP codes, IDs), "1_000", "nan",
+    # "inf" and non-ASCII digits are text, not numbers.
+    if _INT_RE.match(s):
         return "integer"
-    except ValueError:
-        pass
-    try:
-        float(s)
+    if _FLOAT_RE.match(s):
         return "number"
-    except ValueError:
-        pass
     # Dates stay as "string" (JSON Schema uses format: date)
     return "string"
 

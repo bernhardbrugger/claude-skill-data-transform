@@ -17,3 +17,7 @@ Thumbs.db
 
 # Packaging output
 *.skill
+
+.venv*/
+__pycache__/
+.pytest_cache/

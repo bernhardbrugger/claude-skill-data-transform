@@ -26,6 +26,7 @@ Usage:
 """
 
 import argparse
+import copy
 import csv
 import io
 import json
@@ -54,6 +55,13 @@ _DATE_RE = [
     re.compile(r"^\d{4}/\d{2}/\d{2}$"),    # 2024/01/31
     re.compile(r"^\d{2}-\d{2}-\d{4}$"),    # 01-31-2024
 ]
+
+# Numbers: no leading zeros ("007" stays text), ASCII digits only, no nan/inf.
+_INT_RE = re.compile(r"^[+-]?(?:0|[1-9][0-9]*)$", re.ASCII)
+_FLOAT_RE = re.compile(
+    r"^[+-]?(?:(?:0|[1-9][0-9]*)\.[0-9]*|\.[0-9]+|(?:0|[1-9][0-9]*)(?=[eE]))(?:[eE][+-]?[0-9]+)?$",
+    re.ASCII,
+)
 
 # SQL type promotion: index position is the "rank" (higher = more general)
 _TYPE_RANK = {"boolean": 0, "integer": 1, "float": 2, "date": 3, "text": 4}
@@ -101,18 +109,12 @@ def _infer(s: str, nulls: frozenset) -> Any:
         return True
     if lo in ("false", "no", "off"):
         return False
-    # Integer — reject leading-zero strings like "007"
-    try:
-        iv = int(s)
-        if s in (str(iv), f"+{iv}", f"-{abs(iv)}" if iv < 0 else None):
-            return iv
-    except (ValueError, TypeError):
-        pass
-    # Float (includes scientific notation like 1e5)
-    try:
+    # Strict ASCII number syntax. Python's int()/float() would also accept "1_000", "٣",
+    # "nan" and "inf", and "01234" would come back as 1234.0 - corrupting IDs and ZIP codes.
+    if _INT_RE.match(s):
+        return int(s)
+    if _FLOAT_RE.match(s):
         return float(s)
-    except ValueError:
-        pass
     return s
 
 
@@ -203,18 +205,46 @@ def flatten(row: Any, sep: str = "__", prefix: str = "") -> Row:
     return out
 
 
-def explode(rows: Iterator[Row], field: str) -> Iterator[Row]:
-    """Yield one row per element in the named array field."""
+def explode(rows: Iterator[Row], field: str, sep: str = "__") -> Iterator[Row]:
+    """Yield one row per element in the named array field.
+
+    `field` may be a top-level key or a path into nested objects ("order.items" or
+    "order__items": split on `sep` or "."). Run this BEFORE flatten(), which turns arrays
+    into JSON strings. An empty array keeps the row with the field set to null, so no row
+    disappears silently.
+    """
     for row in rows:
-        val = row.get(field)
-        if isinstance(val, list):
-            base = {k: v for k, v in row.items() if k != field}
-            for item in val:
-                new = dict(base)
-                if isinstance(item, dict):
-                    new.update({f"{field}__{k}": v for k, v in item.items()})
-                else:
-                    new[field] = item
+        if not isinstance(row, dict):
+            yield row
+            continue
+        if field in row:
+            val = row[field]
+            if isinstance(val, list):
+                base = {k: v for k, v in row.items() if k != field}
+                if not val:
+                    yield {**base, field: None}
+                for item in val:
+                    new = dict(base)
+                    if isinstance(item, dict):
+                        new.update({f"{field}__{k}": v for k, v in item.items()})
+                    else:
+                        new[field] = item
+                    yield new
+            else:
+                yield row
+            continue
+        path = next((field.split(s) for s in (sep, ".") if s and s in field), None)
+        parent: Any = row
+        for key in (path or [])[:-1]:
+            parent = parent.get(key) if isinstance(parent, dict) else None
+        if path and isinstance(parent, dict) and isinstance(parent.get(path[-1]), list):
+            items = parent[path[-1]] or [None]
+            for item in items:
+                new = copy.deepcopy(row)
+                node = new
+                for key in path[:-1]:
+                    node = node[key]
+                node[path[-1]] = item
                 yield new
         else:
             yield row
@@ -239,6 +269,18 @@ def write_ndjson(rows: List[Row]) -> str:
     return "\n".join(json.dumps(r, ensure_ascii=False, default=str) for r in rows)
 
 
+def _csv_cell(v: Any) -> Any:
+    """One value as CSV cell: null -> empty, booleans as true/false (like every other writer),
+    nested objects/arrays as JSON."""
+    if v is None:
+        return ""
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (dict, list)):
+        return json.dumps(v, ensure_ascii=False, default=str)
+    return v
+
+
 def write_csv(rows: List[Row], delimiter: str = ",") -> str:
     if not rows:
         return ""
@@ -248,12 +290,7 @@ def write_csv(rows: List[Row], delimiter: str = ",") -> str:
                        extrasaction="ignore", restval="", lineterminator="\n")
     w.writeheader()
     for row in rows:
-        w.writerow({
-            k: ("" if v is None
-                else json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list))
-                else v)
-            for k, v in row.items()
-        })
+        w.writerow({k: _csv_cell(v) for k, v in row.items()})
     return buf.getvalue()
 
 
@@ -364,26 +401,44 @@ def write_yaml(rows: List[Row]) -> str:
     return "\n".join(lines) + "\n"
 
 
+_TOML_ESC = {"\\": "\\\\", '"': '\\"', "\n": "\\n", "\r": "\\r", "\t": "\\t", "\b": "\\b", "\f": "\\f"}
+
+
+def _toml_str(s: str) -> str:
+    """TOML basic string: escapes quotes, backslashes, newlines and other control characters."""
+    return '"' + "".join(
+        _TOML_ESC.get(ch) or (f"\\u{ord(ch):04x}" if ord(ch) < 0x20 or ord(ch) == 0x7F else ch)
+        for ch in s
+    ) + '"'
+
+
+def _toml_val(v: Any) -> str:
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, float):
+        if v != v:
+            return "nan"
+        if v in (float("inf"), float("-inf")):
+            return "inf" if v > 0 else "-inf"
+        return repr(v)
+    if isinstance(v, list):  # TOML has no null: drop them
+        return "[" + ", ".join(_toml_val(x) for x in v if x is not None) + "]"
+    if isinstance(v, dict):  # inline table: key = value, not JSON's "key": value
+        return "{" + ", ".join(f"{_toml_str(str(k))} = {_toml_val(x)}"
+                               for k, x in v.items() if x is not None) + "}"
+    return _toml_str(str(v))
+
+
 def write_toml(rows: List[Row]) -> str:
-    """Emit rows as TOML array of tables ([[record]])."""
+    """Emit rows as TOML array of tables ([[record]]). Null values are omitted (TOML 1.0 has no null)."""
     lines = []
     for row in rows:
         lines.append("[[record]]")
         for k, v in row.items():
-            safe_k = k.replace('"', '\\"')
-            if v is None:
-                continue  # TOML 1.0 has no null
-            elif isinstance(v, bool):
-                lines.append(f'"{safe_k}" = {"true" if v else "false"}')
-            elif isinstance(v, int):
-                lines.append(f'"{safe_k}" = {v}')
-            elif isinstance(v, float):
-                lines.append(f'"{safe_k}" = {v}')
-            elif isinstance(v, (dict, list)):
-                lines.append(f'"{safe_k}" = {json.dumps(v, ensure_ascii=False)}')
-            else:
-                s = str(v).replace("\\", "\\\\").replace('"', '\\"')
-                lines.append(f'"{safe_k}" = "{s}"')
+            if v is not None:
+                lines.append(f"{_toml_str(str(k))} = {_toml_val(v)}")
         lines.append("")
     return "\n".join(lines)
 
@@ -486,37 +541,51 @@ def main() -> None:
     else:
         sys.exit(f"Unsupported input format: {from_fmt!r}")
 
-    # ── Transform
+    # ── Transform (explode first: flatten() turns arrays into JSON strings)
+    if args.explode:
+        rows_iter = explode(rows_iter, args.explode, sep=args.sep)
     if args.flatten:
         rows_iter = (flatten(r, sep=args.sep) for r in rows_iter)
-    if args.explode:
-        rows_iter = explode(rows_iter, args.explode)
 
     # ── Write
     if args.stream and to_fmt in ("ndjson", "csv", "tsv"):
-        # True streaming path — never materialises the whole dataset
-        if to_fmt == "ndjson":
-            result = "\n".join(
-                json.dumps(r, ensure_ascii=False, default=str) for r in rows_iter
-            )
-        else:
-            buf    = io.StringIO()
-            writer = None
-            for row in rows_iter:
-                if writer is None:
-                    writer = csv.DictWriter(
-                        buf, fieldnames=list(row.keys()),
-                        delimiter=out_delim, extrasaction="ignore",
-                        restval="", lineterminator="\n",
-                    )
-                    writer.writeheader()
-                writer.writerow({
-                    k: ("" if v is None
-                        else json.dumps(v) if isinstance(v, (dict, list))
-                        else v)
-                    for k, v in row.items()
-                })
-            result = buf.getvalue()
+        # True streaming path: rows go to the output as they are read, nothing is collected.
+        # (JSON and YAML input are still parsed as a whole; CSV/TSV/NDJSON input is streamed.)
+        out = open(args.output, "w", encoding="utf-8") if args.output else sys.stdout
+        written = 0
+        try:
+            if to_fmt == "ndjson":
+                for i, row in enumerate(rows_iter):
+                    line = ("\n" if i else "") + json.dumps(row, ensure_ascii=False, default=str)
+                    out.write(line)
+                    written += len(line)
+                if written:
+                    out.write("\n")
+            else:
+                writer = None
+                dropped: Dict[str, None] = {}
+                for row in rows_iter:
+                    if writer is None:
+                        writer = csv.DictWriter(
+                            out, fieldnames=list(row.keys()),
+                            delimiter=out_delim, extrasaction="ignore",
+                            restval="", lineterminator="\n",
+                        )
+                        writer.writeheader()
+                    dropped.update(dict.fromkeys(k for k in row if k not in writer.fieldnames))
+                    writer.writerow({k: _csv_cell(v) for k, v in row.items()})
+                    written += 1
+                if dropped:
+                    print("warning: --stream takes the columns from the first row; these later "
+                          f"columns were dropped: {', '.join(map(str, dropped))}. "
+                          "Run without --stream to keep all columns.", file=sys.stderr)
+        finally:
+            if args.output:
+                out.close()
+        if args.output:
+            print(f"✓  Streamed {written:,} {'chars' if to_fmt == 'ndjson' else 'rows'} → {args.output}",
+                  file=sys.stderr)
+        return
     else:
         rows: List[Row] = list(rows_iter)
         if to_fmt == "json":

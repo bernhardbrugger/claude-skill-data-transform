@@ -155,10 +155,10 @@ Key flags:
   --dialect      SQL dialect: sqlite mysql postgres (default: sqlite)
   --flatten      Recursively flatten nested JSON objects
   --sep          Separator for flattened key paths (default: __)
-  --explode      Expand array field: one output row per element
+  --explode      Expand array field (nested paths like user__tags work): one output row per element
   --null-values  Extra null strings, comma-separated
   --no-infer     Keep all values as strings
-  --stream       Stream output without loading full file into memory
+  --stream       Write rows as they are read (CSV/TSV/NDJSON output; JSON/YAML input is still read whole)
   --pretty       Pretty-print JSON output
   -o FILE        Write to file instead of stdout
 ```
@@ -186,3 +186,10 @@ MIT — free to use, modify, and redistribute.
 ---
 
 *Built as a Claude Code skill by [@bernhardbrugger](https://github.com/bernhardbrugger)*
+
+## Development
+```bash
+pip install pytest pyyaml
+pytest
+```
+The tests cover type inference, explode/flatten, every writer (TOML output is parsed back with `tomllib` on Python 3.11+) and streaming. A GitHub Actions workflow is prepared in `ci/github-actions-ci.yml`.
