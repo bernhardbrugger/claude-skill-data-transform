@@ -192,4 +192,4 @@ MIT — free to use, modify, and redistribute.
 pip install pytest pyyaml
 pytest
 ```
-The tests cover type inference, explode/flatten, every writer (TOML output is parsed back with `tomllib` on Python 3.11+) and streaming. A GitHub Actions workflow is prepared in `ci/github-actions-ci.yml`.
+The tests cover type inference, explode/flatten, every writer (TOML output is parsed back with `tomllib` on Python 3.11+) and streaming. CI runs the tests on Linux and Windows (`.github/workflows/ci.yml`).
