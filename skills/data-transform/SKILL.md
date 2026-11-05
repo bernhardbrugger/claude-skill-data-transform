@@ -6,7 +6,7 @@ description: >
   "parse and reshape data", "normalize my CSV", "export data as markdown table", "convert
   spreadsheet data", "transform my data format", "change file format", "convert NDJSON to CSV",
   "explode array field", or mentions converting between data formats like CSV, JSON, SQL, YAML,
-  XML, TOML, TSV, Markdown tables, or NDJSON. Also use this skill when the user asks to
+  TSV, Markdown tables, TOML, or NDJSON. Also use this skill when the user asks to
   "infer schema from data", "detect column types", "what columns are in this file",
   "generate CREATE TABLE from my data", "find null values", or "validate data structure".
   Use this skill any time a user pastes data and wants it in a different format — even if they
@@ -16,10 +16,11 @@ version: 1.1.0
 
 # Data Transform
 
-Convert data between CSV, JSON, SQL, YAML, Markdown tables, TOML, TSV, and NDJSON
-with two bundled Python scripts. Handles encoding detection, type inference, null
-normalization, nested-object flattening, array explosion, and large-file streaming —
-zero external dependencies needed.
+Convert CSV, TSV, JSON, NDJSON and YAML (input) into any of CSV, TSV, JSON, NDJSON, SQL,
+YAML, Markdown tables and TOML (output) with two bundled Python scripts. XML, TOML and
+Markdown are not accepted as input. Handles encoding detection, type inference, null
+normalization, nested-object flattening, array explosion, and large-file streaming. Only the
+standard library is needed, except that reading YAML requires `pip install pyyaml`.
 
 ## Quick Start
 

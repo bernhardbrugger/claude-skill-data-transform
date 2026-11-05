@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+- **Unknown input extensions are refused.** `data.xml` (or `.toml`, `.md`) used to be read as CSV and gave `[]` or garbage without a message. Now the script says which input formats exist and points to `--from`. `.txt`, `.dat` and no extension still count as CSV.
+- **Docs matched to the code.** The skill description offered XML, which was never supported; SKILL.md and README now state the real input and output formats, and that YAML input needs PyYAML. The format table is verified cell by cell by tests (NDJSON/YAML to TOML work and were wrongly shown as unsupported). 97 tests.
+
 ## 1.1.0
 Fixes for behaviour that the documentation promised but the code did not deliver:
 - **Type inference corrupted IDs.** ZIP codes and IDs with leading zeros (`01234`) came back as `1234.0`, `1_000` as `1000.0`. Numbers are now matched with strict ASCII syntax; ambiguous values stay text. `infer_schema.py` uses the same rules (it used to propose INTEGER columns for ZIP codes).

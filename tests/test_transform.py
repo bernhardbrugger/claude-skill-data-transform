@@ -217,3 +217,45 @@ def test_infer_schema_agrees_with_transform_on_ids(tmp_path):
     assert r.returncode == 0, r.stderr
     assert '"zip" TEXT' in r.stdout or "zip TEXT" in r.stdout or "`zip` TEXT" in r.stdout
     assert "qty INTEGER" in r.stdout.replace('"', "").replace("`", "")
+
+
+# ── input formats and the format table ─────────────────────────────────────
+
+SAMPLES = {
+    "csv": "a,b\n1,x\n2,y\n",
+    "tsv": "a\tb\n1\tx\n2\ty\n",
+    "json": '[{"a": 1, "b": "x"}, {"a": 2, "b": "y"}]',
+    "ndjson": '{"a": 1, "b": "x"}\n{"a": 2, "b": "y"}\n',
+    "yaml": "- a: 1\n  b: x\n- a: 2\n  b: y\n",
+}
+OUTPUTS = ["csv", "tsv", "json", "ndjson", "sql", "yaml", "markdown", "toml"]
+
+
+@pytest.mark.parametrize("to", OUTPUTS)
+@pytest.mark.parametrize("src", list(SAMPLES))
+def test_every_documented_input_converts_to_every_documented_output(tmp_path, src, to):
+    if src == "yaml":
+        pytest.importorskip("yaml")
+    f = tmp_path / f"d.{src}"
+    f.write_text(SAMPLES[src], encoding="utf-8")
+    res = run(str(f), "--to", to)
+    assert res.returncode == 0, res.stderr
+    assert "x" in res.stdout and "y" in res.stdout
+
+
+@pytest.mark.parametrize("ext", ["xml", "toml", "md", "html"])
+def test_an_unknown_extension_is_refused_not_read_as_csv(tmp_path, ext):
+    f = tmp_path / f"d.{ext}"
+    f.write_text("<a><b>1</b></a>", encoding="utf-8")
+    res = run(str(f), "--to", "json")
+    assert res.returncode != 0 and res.stdout == ""
+    assert f"'.{ext}'" in res.stderr and "--from" in res.stderr
+
+
+def test_plain_text_and_extensionless_files_still_count_as_csv(tmp_path):
+    for name in ("d.txt", "d.dat", "data"):
+        f = tmp_path / name
+        f.write_text(SAMPLES["csv"], encoding="utf-8")
+        res = run(str(f), "--to", "json")
+        assert res.returncode == 0 and json.loads(res.stdout)[0] == {"a": 1, "b": "x"}
+    assert t._detect_format("-") == "csv"

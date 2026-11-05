@@ -92,12 +92,19 @@ def _detect_format(path: Optional[str]) -> str:
     if not path or path == "-":
         return "csv"
     ext = os.path.splitext(path)[1].lower().lstrip(".")
-    return {
-        "csv": "csv", "tsv": "tsv", "tab": "tsv",
+    known = {
+        "csv": "csv", "txt": "csv", "dat": "csv", "": "csv",
+        "tsv": "tsv", "tab": "tsv",
         "json": "json",
         "ndjson": "ndjson", "jsonl": "ndjson",
         "yaml": "yaml", "yml": "yaml",
-    }.get(ext, "csv")
+    }
+    if ext not in known:
+        # Reading an XML or TOML file as CSV used to give an empty or garbled result without
+        # any message; say so instead.
+        sys.exit(f"Cannot tell the input format of '.{ext}' files. Input formats are csv, tsv, "
+                 "json, ndjson and yaml; if the file really is one of them, pass --from.")
+    return known[ext]
 
 
 def _infer(s: str, nulls: frozenset) -> Any:

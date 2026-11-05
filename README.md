@@ -19,7 +19,7 @@ This Claude Code skill gives Claude two powerful Python scripts and expert knowl
 | "Generate a CREATE TABLE for this CSV" | Runs `infer_schema.py data.csv --output sql` |
 | "Make this a markdown table" | Runs `transform.py data.csv --to markdown` |
 
-**No external dependencies.** Pure Python 3.8+ stdlib. Optional `pip install pyyaml` for YAML input/output.
+**No external dependencies for CSV, TSV, JSON and NDJSON.** Pure Python 3.8+ stdlib; reading YAML needs `pip install pyyaml`.
 
 ---
 
@@ -29,8 +29,10 @@ This Claude Code skill gives Claude two powerful Python scripts and expert knowl
 |------------|:---:|:----:|:------:|:---:|:----:|:--------:|:----:|
 | CSV / TSV  | ✓   | ✓    | ✓      | ✓   | ✓    | ✓        | ✓    |
 | JSON       | ✓   | —    | ✓      | ✓   | ✓    | ✓        | ✓    |
-| NDJSON     | ✓   | ✓    | —      | ✓   | ✓    | ✓        | —    |
-| YAML       | ✓   | ✓    | ✓      | ✓   | —    | ✓        | —    |
+| NDJSON     | ✓   | ✓    | —      | ✓   | ✓    | ✓        | ✓    |
+| YAML       | ✓   | ✓    | ✓      | ✓   | ✓    | ✓        | ✓    |
+
+Every cell is checked by the test suite (reading YAML needs PyYAML; TSV output is `--to tsv`). XML, TOML and Markdown are not accepted as input; a file with an unknown extension is refused with a message instead of being read as CSV (use `--from` to force a format).
 
 ---
 
