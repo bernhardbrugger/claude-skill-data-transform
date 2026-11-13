@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # CI uses only GitHub Actions (checkout, setup-python); keep them current.
+  # The skill is stdlib-only (PyYAML optional, unpinned), so there is no
+  # Python manifest for Dependabot to update.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ['*']
