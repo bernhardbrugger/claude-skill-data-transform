@@ -344,6 +344,48 @@ def test_json_schema_enums_match_the_data_they_came_from(tmp_path):
             assert value in props[col]["enum"], (col, value)
 
 
+_JSON_TYPES = {"string": str, "integer": int, "number": (int, float), "boolean": bool,
+               "null": type(None)}
+
+
+def _fits(value, types):
+    """Does a JSON value match a JSON Schema "type" (one name or a list)?"""
+    names = [types] if isinstance(types, str) else types
+    for name in names:
+        if isinstance(value, bool) and name in ("integer", "number"):
+            continue  # true is no integer in JSON Schema, although Python says so
+        if isinstance(value, _JSON_TYPES[name]):
+            return True
+    return False
+
+
+def test_json_input_keeps_its_types_in_the_schema(tmp_path):
+    # In JSON, "5" and "yes" are strings (transform.py leaves them so), and a column with true
+    # and 5 needs both types: JSON Schema "integer" rejects true.
+    rows = [{"a": True, "zip": "01067", "word": "yes", "n": "5", "d": "2024-01-31"},
+            {"a": 5, "zip": "80331", "word": "no", "n": None, "d": "2024-02-01"}]
+    f = tmp_path / "d.json"
+    f.write_text(json.dumps(rows), encoding="utf-8")
+    schema = SCRIPT.with_name("infer_schema.py")
+
+    def schema_out(fmt):
+        r = subprocess.run([sys.executable, str(schema), str(f), "--output", fmt],
+                           capture_output=True, text=True, encoding="utf-8")
+        assert r.returncode == 0, r.stderr
+        return r.stdout
+
+    props = json.loads(schema_out("json-schema"))["properties"]
+    for row in rows:
+        for col, value in row.items():
+            assert _fits(value, props[col]["type"]), (col, value, props[col]["type"])
+    assert props["d"]["format"] == "date"
+    ddl = schema_out("sql").replace('"', "")
+    sql = run(str(f), "--to", "sql", "--dialect", "postgres").stdout.replace('"', "")
+    for col, typ in (("a", "INTEGER"), ("zip", "TEXT"), ("word", "TEXT"), ("n", "TEXT"),
+                     ("d", "DATE")):
+        assert f"{col} {typ}" in ddl and f"{col} {typ}" in sql, col
+
+
 # ── input formats and the format table ─────────────────────────────────────
 
 SAMPLES = {

@@ -74,8 +74,12 @@ _SQL_MAP = {
 
 # ── Type inference ────────────────────────────────────────────────────────
 
-def _classify(val: Any) -> str:
-    """Return the JSON Schema primitive type of a value."""
+def _classify(val: Any, parse_text: bool = True) -> str:
+    """Return the JSON Schema primitive type of a value.
+
+    parse_text=False is for JSON input, where a string is a string: "5" and "yes" stay text, as
+    they do in transform.py's output. Only CSV cells are parsed into numbers and booleans.
+    """
     if val is None:
         return "null"
     if isinstance(val, bool):
@@ -87,6 +91,8 @@ def _classify(val: Any) -> str:
     if isinstance(val, (dict, list)):
         return "string"
     s = str(val)
+    if not parse_text:
+        return "date" if _is_date(s) else "string"
     if s in _NULL_VALS:
         return "null"
     lo = s.lower()
@@ -121,7 +127,7 @@ def _promote(a: str, b: str) -> str:
 
 class ColStats:
     __slots__ = ("count", "null_count", "_type", "uniques",
-                 "overflowed", "min_len", "max_len", "samples")
+                 "overflowed", "min_len", "max_len", "samples", "native_bool")
 
     def __init__(self):
         self.count      : int           = 0
@@ -132,10 +138,13 @@ class ColStats:
         self.min_len    : Optional[int] = None
         self.max_len    : Optional[int] = None
         self.samples    : List[Any]     = []
+        self.native_bool: bool          = False  # a JSON true/false, not the word "yes"
 
-    def observe(self, val: Any, enum_cap: int) -> None:
+    def observe(self, val: Any, enum_cap: int, parse_text: bool = True) -> None:
         self.count += 1
-        t = _classify(val)
+        t = _classify(val, parse_text)
+        if isinstance(val, bool):
+            self.native_bool = True
         if t == "null":
             self.null_count += 1
             return
@@ -256,11 +265,16 @@ def to_json_schema(stats: Dict[str, ColStats], enum_cap: int) -> dict:
         is_date = t == "date"
         if is_date:
             t = "string"  # JSON Schema has no date type
+        types = [t]
+        if s.native_bool and t in ("integer", "number"):
+            # JSON true next to numbers: the column is integer for SQL (transform.py writes
+            # 1/0), but a JSON Schema "integer" rejects true, so both types are allowed.
+            types = ["boolean", t]
         if s.nullable:
-            prop["type"] = [t, "null"]
+            types.append("null")
         else:
-            prop["type"] = t
             required.append(col)
+        prop["type"] = types if len(types) > 1 else t
         if is_date:
             # format "date" is RFC 3339 full-date (2024-01-31), the only spelling _is_date takes.
             prop["format"] = "date"
@@ -354,6 +368,8 @@ examples:
         sys.exit(f"File not found: {args.input!r}")
 
     rows, total = load_rows(args.input, args.sample)
+    ext = os.path.splitext(args.input)[1].lower().lstrip(".")
+    parse_text = ext not in ("json", "ndjson", "jsonl")
     if not rows:
         sys.exit("No rows found in input file.")
 
@@ -364,7 +380,7 @@ examples:
         for col, val in row.items():
             if col not in stats:
                 stats[col] = ColStats()
-            stats[col].observe(val, args.enum_threshold)
+            stats[col].observe(val, args.enum_threshold, parse_text)
 
     if not stats:
         sys.exit("No columns detected.")

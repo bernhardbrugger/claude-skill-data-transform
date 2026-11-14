@@ -85,6 +85,9 @@ cat records.ndjson | python scripts/transform.py --from ndjson --to csv
 | `--sample` | `1000` | Max rows to analyze |
 | `--enum-threshold` | `20` | Max unique values before dropping enum detection |
 
+CSV cells are parsed into numbers, booleans and dates; JSON and NDJSON values keep their JSON
+type (`"5"` stays a string), as they do in `transform.py`'s output.
+
 ## Recommended Workflow for Unknown Data
 
 Run these three commands in sequence before committing to a conversion:
