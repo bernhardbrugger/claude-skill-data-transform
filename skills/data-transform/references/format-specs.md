@@ -33,7 +33,7 @@ An empty CSV cell (`,,`) becomes empty string `""`, which is always treated as `
 Pass `--no-header`. Columns are named `col0`, `col1`, … Use with caution — type inference still runs but column names are meaningless until renamed.
 
 ### Excel quirks
-- Dates exported from Excel often arrive as `MM/DD/YYYY` (`01/31/2024`), which the date pattern detector recognises.
+- Dates exported from Excel often arrive as `MM/DD/YYYY` (`01/31/2024`). They stay text (`TEXT` in SQL), because `01/02/2024` is January in one locale and February in another; convert them to ISO (`2024-01-31`) to get a `DATE` column.
 - Numbers with thousands separators (`1,234.56`) are **not** auto-converted to float — they stay as strings. Strip commas before conversion.
 - Currency symbols (`$1.99`) stay as strings.
 
@@ -122,7 +122,7 @@ Large datasets are split into batches of `--batch N` rows per `INSERT INTO … V
 | `bool`               | INTEGER  | TINYINT(1)   | BOOLEAN          |
 | `int`                | INTEGER  | INT          | INTEGER          |
 | `float`              | REAL     | DOUBLE       | DOUBLE PRECISION |
-| date string          | TEXT     | DATE         | DATE             |
+| ISO date `2024-01-31`| TEXT     | DATE         | DATE             |
 | everything else      | TEXT     | TEXT         | TEXT             |
 
 Columns with **mixed** int + float → promoted to REAL / DOUBLE.

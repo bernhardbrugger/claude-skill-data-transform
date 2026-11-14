@@ -28,6 +28,7 @@ Usage:
 import argparse
 import copy
 import csv
+import datetime
 import io
 import json
 import os
@@ -49,12 +50,22 @@ Row = Dict[str, Any]
 
 _DEFAULT_NULLS = "null,NULL,N/A,n/a,NA,na,None,none,-,—,nil,NaN"
 
-_DATE_RE = [
-    re.compile(r"^\d{4}-\d{2}-\d{2}$"),    # 2024-01-31
-    re.compile(r"^\d{2}/\d{2}/\d{4}$"),    # 01/31/2024
-    re.compile(r"^\d{4}/\d{2}/\d{2}$"),    # 2024/01/31
-    re.compile(r"^\d{2}-\d{2}-\d{4}$"),    # 01-31-2024
-]
+# Only ISO dates (2024-01-31) that name a real calendar day go into DATE columns: MySQL
+# rejects 01/31/2024 in a DATE column, PostgreSQL reads 01/02/2024 as January or February
+# depending on the server's DateStyle, and 2024-02-30 fails in both. Other spellings stay text.
+_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$", re.ASCII)
+
+
+def _is_date(s: str) -> bool:
+    m = _DATE_RE.match(s)
+    if not m:
+        return False
+    try:
+        datetime.date(int(m[1]), int(m[2]), int(m[3]))
+    except ValueError:
+        return False
+    return True
+
 
 # Numbers: no leading zeros ("007" stays text), ASCII digits only, no nan/inf.
 _INT_RE = re.compile(r"^[+-]?(?:0|[1-9][0-9]*)$", re.ASCII)
@@ -348,7 +359,7 @@ def _sql_col_kinds(rows: List[Row]) -> Dict[str, str]:
                 t = "integer"
             elif isinstance(val, float):
                 t = "float"
-            elif isinstance(val, str) and any(p.match(val) for p in _DATE_RE):
+            elif isinstance(val, str) and _is_date(val):
                 t = "date"
             else:
                 t = "text"

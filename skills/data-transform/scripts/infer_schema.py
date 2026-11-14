@@ -19,6 +19,7 @@ Requirements: Python 3.8+  (stdlib only)
 
 import argparse
 import csv
+import datetime
 import json
 import os
 import re
@@ -32,14 +33,22 @@ _NULL_VALS = frozenset([
     "None", "none", "-", "—", "nil", "NaN",
 ])
 
-# Kept in sync with transform.py, so both scripts call the same columns dates.
-_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_DATE_RE = [
-    _ISO_DATE_RE,
-    re.compile(r"^\d{2}/\d{2}/\d{4}$"),
-    re.compile(r"^\d{4}/\d{2}/\d{2}$"),
-    re.compile(r"^\d{2}-\d{2}-\d{4}$"),
-]
+# Kept in sync with transform.py, so both scripts call the same columns dates: only ISO dates
+# (2024-01-31) that name a real calendar day. MySQL rejects 01/31/2024 in a DATE column and
+# PostgreSQL reads 01/02/2024 by its DateStyle setting, so other spellings are strings.
+_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$", re.ASCII)
+
+
+def _is_date(s: str) -> bool:
+    m = _DATE_RE.match(s)
+    if not m:
+        return False
+    try:
+        datetime.date(int(m[1]), int(m[2]), int(m[3]))
+    except ValueError:
+        return False
+    return True
+
 
 # Numbers: no leading zeros, ASCII digits only, no nan/inf (kept in sync with transform.py)
 _INT_RE = re.compile(r"^[+-]?(?:0|[1-9][0-9]*)$", re.ASCII)
@@ -89,7 +98,7 @@ def _classify(val: Any) -> str:
         return "integer"
     if _FLOAT_RE.match(s):
         return "number"
-    if any(p.match(s) for p in _DATE_RE):
+    if _is_date(s):
         return "date"
     return "string"
 
@@ -112,7 +121,7 @@ def _promote(a: str, b: str) -> str:
 
 class ColStats:
     __slots__ = ("count", "null_count", "_type", "uniques",
-                 "overflowed", "min_len", "max_len", "samples", "iso_dates")
+                 "overflowed", "min_len", "max_len", "samples")
 
     def __init__(self):
         self.count      : int           = 0
@@ -123,7 +132,6 @@ class ColStats:
         self.min_len    : Optional[int] = None
         self.max_len    : Optional[int] = None
         self.samples    : List[Any]     = []
-        self.iso_dates  : bool          = True
 
     def observe(self, val: Any, enum_cap: int) -> None:
         self.count += 1
@@ -133,8 +141,6 @@ class ColStats:
             return
         self._type = _promote(self._type, t)
         s = str(val)
-        if t == "date" and not _ISO_DATE_RE.match(s):
-            self.iso_dates = False
         ln = len(s)
         self.min_len = ln if self.min_len is None else min(self.min_len, ln)
         self.max_len = ln if self.max_len is None else max(self.max_len, ln)
@@ -255,8 +261,8 @@ def to_json_schema(stats: Dict[str, ColStats], enum_cap: int) -> dict:
         else:
             prop["type"] = t
             required.append(col)
-        if is_date and s.iso_dates:
-            # format "date" means RFC 3339 full-date (2024-01-31); other spellings are plain strings.
+        if is_date:
+            # format "date" is RFC 3339 full-date (2024-01-31), the only spelling _is_date takes.
             prop["format"] = "date"
         if t == "string" and s.max_len:
             prop["maxLength"] = s.max_len

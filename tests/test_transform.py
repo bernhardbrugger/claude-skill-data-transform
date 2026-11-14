@@ -290,10 +290,11 @@ def test_infer_schema_agrees_with_transform_on_ids(tmp_path):
 
 
 def test_infer_schema_agrees_with_transform_on_dates(tmp_path):
-    # iso: ISO dates; us: other date spelling; mixed: a date column that also holds a number.
+    # iso: ISO dates; us: other date spelling (text, see below); mixed: a date column that
+    # also holds a number; bad: ISO spelling but no calendar day.
     f = tmp_path / "d.csv"
-    f.write_text("iso,us,mixed\n2024-01-31,01/31/2024,2024-01-31\n,02/28/2024,5\n",
-                 encoding="utf-8")
+    f.write_text("iso,us,mixed,bad\n2024-01-31,01/31/2024,2024-01-31,2024-02-28\n"
+                 ",02/28/2024,5,2024-02-30\n", encoding="utf-8")
     schema = SCRIPT.with_name("infer_schema.py")
 
     def schema_out(fmt):
@@ -304,12 +305,26 @@ def test_infer_schema_agrees_with_transform_on_dates(tmp_path):
 
     ddl = schema_out("sql").replace('"', "")
     sql = run(str(f), "--to", "sql", "--dialect", "postgres").stdout.replace('"', "")
-    for col, typ in (("iso", "DATE"), ("us", "DATE"), ("mixed", "TEXT")):
+    for col, typ in (("iso", "DATE"), ("us", "TEXT"), ("mixed", "TEXT"), ("bad", "TEXT")):
         assert f"{col} {typ}" in ddl and f"{col} {typ}" in sql
     props = json.loads(schema_out("json-schema"))["properties"]
     assert props["iso"]["type"] == ["string", "null"] and props["iso"]["format"] == "date"
-    assert props["us"]["type"] == "string" and "format" not in props["us"]
-    assert "format" not in props["mixed"]
+    for col in ("us", "mixed", "bad"):
+        assert "format" not in props[col]
+
+
+def test_sql_date_columns_hold_only_iso_calendar_days():
+    # MySQL rejects 01/31/2024 in a DATE column (it wants year first), PostgreSQL reads
+    # 01/02/2024 as January or February depending on DateStyle, and 2024-02-30 is no day at
+    # all: such columns are TEXT, with the value kept as written.
+    for value in ("01/31/2024", "01-31-2024", "2024/01/31", "2024-02-30", "2023-13-01",
+                  "٢٠٢٤-٠١-٣١"):
+        for dialect in ("mysql", "postgres"):
+            out = t.write_sql([{"d": value}], dialect=dialect)
+            assert "d` TEXT" in out or '"d" TEXT' in out, (value, dialect)
+            assert _insert_values(out) == [f"('{value}')"]
+    out = t.write_sql([{"d": "2024-02-29"}, {"d": "1999-12-31"}], dialect="mysql")
+    assert "`d` DATE" in out
 
 
 def test_json_schema_enums_match_the_data_they_came_from(tmp_path):
