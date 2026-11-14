@@ -60,6 +60,36 @@ def test_csv_to_json_is_valid_json_and_keeps_ids(tmp_path):
     assert strict_json(r.stdout) == [{"zip": "01234", "code": "1_000", "x": "nan", "y": "Infinity"}]
 
 
+def test_csv_types_are_decided_per_column(tmp_path):
+    # A ZIP column with 01067 and 80331 must not come out as one string and one number.
+    f = tmp_path / "c.csv"
+    f.write_text("zip,answer,score,flag,note\n"
+                 "01067,yes,4,true,\n"
+                 "80331,maybe,4.5,false,N/A\n"
+                 ",no,,,\n", encoding="utf-8")
+    r = run(str(f), "--to", "json")
+    assert r.returncode == 0, r.stderr
+    assert strict_json(r.stdout) == [
+        {"zip": "01067", "answer": "yes", "score": 4, "flag": True, "note": None},
+        {"zip": "80331", "answer": "maybe", "score": 4.5, "flag": False, "note": None},
+        {"zip": None, "answer": "no", "score": None, "flag": None, "note": None},
+    ]
+
+
+def test_infer_columns_keeps_raw_text_only_for_mixed_columns():
+    rows = [{"a": "1", "b": "x", "c": "1"}, {"a": "2", "b": "7", "c": "on"}]
+    assert t.infer_columns(rows, NULLS) == [
+        {"a": 1, "b": "x", "c": "1"}, {"a": 2, "b": "7", "c": "on"}]
+
+
+def test_stream_still_types_each_value_alone(tmp_path):
+    f = tmp_path / "s.csv"
+    f.write_text("zip\n01067\n80331\n", encoding="utf-8")
+    r = run(str(f), "--to", "ndjson", "--stream")
+    assert r.returncode == 0, r.stderr
+    assert [json.loads(line) for line in r.stdout.splitlines()] == [{"zip": "01067"}, {"zip": 80331}]
+
+
 # ── explode / flatten ──────────────────────────────────────────────────────
 
 def test_explode_top_level_dict_items():

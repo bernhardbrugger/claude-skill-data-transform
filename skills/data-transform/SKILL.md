@@ -132,6 +132,11 @@ When `--no-infer` is not set, string values are parsed in this order:
 4. **Float** — decimal or scientific notation (`41.5`, `1e5`, `.5`) → `float`. `nan` and `inf` stay strings, because they are not valid JSON numbers
 5. **String** — everything else
 
+Types are decided per column: if a column's values come out as different kinds (a ZIP
+column with `01067` and `80331`, an answer column with `yes` and `maybe`), the whole column
+stays text. Integers and floats count as one kind. With `--stream` each value is typed on
+its own, because the script cannot look ahead.
+
 SQL output promotes types per column: if a column has mixed int and float values,
 the whole column becomes REAL/DOUBLE.
 

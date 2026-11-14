@@ -125,6 +125,40 @@ def _infer(s: str, nulls: frozenset) -> Any:
     return s
 
 
+def _kind(v: Any) -> str:
+    if isinstance(v, bool):
+        return "bool"
+    if isinstance(v, (int, float)):
+        return "number"
+    return "text" if isinstance(v, str) else "other"
+
+
+def infer_columns(rows: List[Row], nulls: frozenset) -> List[Row]:
+    """Infer types per column instead of per value.
+
+    Each string is parsed with _infer(); a column whose non-null values come out as different
+    kinds (a ZIP column with "01067" and "80331", a column with "yes" and "maybe") keeps its
+    original strings in every row, so one column never holds both numbers and text.
+    Integers and floats count as the same kind.
+    """
+    typed = [{k: (_infer(v, nulls) if isinstance(v, str) else v) for k, v in r.items()}
+             for r in rows]
+    kinds: Dict[Any, str] = {}
+    text_cols = set()
+    for r in typed:
+        for k, v in r.items():
+            if v is None or k in text_cols:
+                continue
+            if kinds.setdefault(k, _kind(v)) != _kind(v):
+                text_cols.add(k)
+    if text_cols:
+        for raw, r in zip(rows, typed):
+            for k in text_cols:
+                if r.get(k) is not None and isinstance(raw.get(k), str):
+                    r[k] = raw[k]
+    return typed
+
+
 # ── Readers ───────────────────────────────────────────────────────────────
 
 def _open(source, encoding: str, mode: str = "r", newline: str = ""):
@@ -545,15 +579,20 @@ def main() -> None:
     nulls  = frozenset(args.null_values.split(","))
     infer  = not args.no_infer
     source = sys.stdin if src is None else src
+    streaming = args.stream and to_fmt in ("ndjson", "csv", "tsv")
 
     # ── Read
     if from_fmt in ("csv", "tsv"):
         delim = "\t" if from_fmt == "tsv" else args.delimiter
+        # Without --stream all rows are in memory anyway, so types are decided per column;
+        # --stream cannot look ahead and types each value on its own.
         rows_iter: Iterator[Row] = read_csv(
             source, delimiter=delim,
             has_header=not args.no_header,
-            nulls=nulls, infer=infer, encoding=enc,
+            nulls=nulls, infer=infer and streaming, encoding=enc,
         )
+        if infer and not streaming:
+            rows_iter = iter(infer_columns(list(rows_iter), nulls))
     elif from_fmt == "json":
         rows_iter = read_json(source, encoding=enc)
     elif from_fmt == "ndjson":
@@ -570,7 +609,7 @@ def main() -> None:
         rows_iter = (flatten(r, sep=args.sep) for r in rows_iter)
 
     # ── Write
-    if args.stream and to_fmt in ("ndjson", "csv", "tsv"):
+    if streaming:
         # True streaming path: rows go to the output as they are read, nothing is collected.
         # (JSON and YAML input are still parsed as a whole; CSV/TSV/NDJSON input is streamed.)
         out = open(args.output, "w", encoding="utf-8") if args.output else sys.stdout
