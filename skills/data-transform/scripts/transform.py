@@ -301,8 +301,9 @@ def write_csv(rows: List[Row], delimiter: str = ",") -> str:
     return buf.getvalue()
 
 
-def _sql_col_types(rows: List[Row], dialect: str) -> Dict[str, str]:
-    ranks: Dict[str, int] = {}
+def _sql_col_kinds(rows: List[Row]) -> Dict[str, str]:
+    """Column -> one of the _TYPE_RANK kinds, the most general kind its values need."""
+    seen: Dict[str, set] = {}
     for row in rows:
         for col, val in row.items():
             if val is None:
@@ -313,16 +314,19 @@ def _sql_col_types(rows: List[Row], dialect: str) -> Dict[str, str]:
                 t = "integer"
             elif isinstance(val, float):
                 t = "float"
+            elif isinstance(val, str) and any(p.match(val) for p in _DATE_RE):
+                t = "date"
             else:
-                s = str(val)
-                t = "date" if any(p.match(s) for p in _DATE_RE) else "text"
-            r = _TYPE_RANK.get(t, 4)
-            ranks[col] = max(ranks.get(col, 0), r)
-    type_names = list(_TYPE_RANK.keys())
-    return {
-        col: _SQL_TYPES[type_names[rank]][dialect]
-        for col, rank in ranks.items()
-    }
+                t = "text"
+            seen.setdefault(col, set()).add(t)
+    kinds = {}
+    for col, ts in seen.items():
+        # A date column that also holds numbers or booleans cannot be DATE: '5' is no date.
+        if "date" in ts and len(ts) > 1:
+            kinds[col] = "text"
+        else:
+            kinds[col] = max(ts, key=_TYPE_RANK.__getitem__)
+    return kinds
 
 
 def write_sql(rows: List[Row], table: str = "data",
@@ -330,21 +334,32 @@ def write_sql(rows: List[Row], table: str = "data",
     if not rows:
         return f"-- No rows to insert into {table}\n"
     keys = _all_keys(rows)
-    types = _sql_col_types(rows, dialect)
+    kinds = _sql_col_kinds(rows)
+    types = {c: _SQL_TYPES[k][dialect] for c, k in kinds.items()}
 
     q = (lambda n: f"`{n}`") if dialect == "mysql" else (lambda n: f'"{n}"')
 
-    def val(x: Any) -> str:
+    def val(x: Any, kind: str) -> str:
+        # Every value is written as a literal of its column's type, so the INSERTs load into
+        # the table created above (PostgreSQL has no implicit int -> boolean cast, for one).
         if x is None:
             return "NULL"
+        if kind in ("text", "date"):
+            if isinstance(x, bool):
+                s = "true" if x else "false"
+            elif isinstance(x, (dict, list)):
+                s = json.dumps(x, ensure_ascii=False, default=str)
+            else:
+                s = str(x)
+            s = s.replace("'", "''")
+            if dialect == "mysql":
+                s = s.replace("\\", "\\\\")
+            return f"'{s}'"
         if isinstance(x, bool):
+            if dialect == "postgres" and kind == "boolean":
+                return "TRUE" if x else "FALSE"
             return "1" if x else "0"
-        if isinstance(x, (int, float)):
-            return str(x)
-        s = str(x).replace("'", "''")
-        if dialect == "mysql":
-            s = s.replace("\\", "\\\\")
-        return f"'{s}'"
+        return str(x)
 
     col_defs = ",\n  ".join(f"{q(c)} {types.get(c, 'TEXT')}" for c in keys)
     out = [f"CREATE TABLE IF NOT EXISTS {q(table)} (\n  {col_defs}\n);\n"]
@@ -353,7 +368,7 @@ def write_sql(rows: List[Row], table: str = "data",
         chunk = rows[i: i + batch]
         cols  = ", ".join(q(c) for c in keys)
         vals  = ",\n  ".join(
-            "(" + ", ".join(val(r.get(c)) for c in keys) + ")"
+            "(" + ", ".join(val(r.get(c), kinds.get(c, "text")) for c in keys) + ")"
             for r in chunk
         )
         out.append(f"\nINSERT INTO {q(table)} ({cols}) VALUES\n  {vals};")

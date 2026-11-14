@@ -142,6 +142,46 @@ def test_sql_escapes_quotes_and_picks_types():
     assert "'O''Brien'" in out
 
 
+def _insert_values(sql):
+    """The value tuples of the first INSERT, one string per row."""
+    body = sql.split("VALUES\n", 1)[1].split(";", 1)[0]
+    return [line.strip().rstrip(",") for line in body.splitlines()]
+
+
+def test_sql_postgres_booleans_are_boolean_literals():
+    # PostgreSQL has no implicit integer -> boolean cast: 1/0 in a BOOLEAN column fails with
+    # 'column "ok" is of type boolean but expression is of type integer'.
+    out = t.write_sql([{"ok": True}, {"ok": False}], dialect="postgres")
+    assert '"ok" BOOLEAN' in out
+    assert _insert_values(out) == ["(TRUE)", "(FALSE)"]
+    for dialect in ("sqlite", "mysql"):
+        assert _insert_values(t.write_sql([{"ok": True}, {"ok": False}],
+                                          dialect=dialect)) == ["(1)", "(0)"]
+
+
+def test_sql_values_match_their_column_type():
+    rows = [{"zip": "01067", "n": True, "d": "2024-01-31", "j": {"a": 1}},
+            {"zip": 80331, "n": 2, "d": 5, "j": [1, "x"]}]
+    out = t.write_sql(rows, dialect="postgres")
+    # A number in a TEXT column is written as text, a boolean in an INTEGER column as 1/0,
+    # a date column that also holds numbers becomes TEXT, nested values are JSON.
+    assert '"zip" TEXT' in out and '"n" INTEGER' in out
+    assert '"d" TEXT' in out and '"j" TEXT' in out
+    assert _insert_values(out) == ["""('01067', 1, '2024-01-31', '{"a": 1}')""",
+                                   """('80331', 2, '5', '[1, "x"]')"""]
+
+
+def test_sql_output_loads_into_sqlite():
+    import sqlite3
+    rows = [{"id": 1, "zip": "01067", "ok": True, "d": "2024-01-31", "j": {"a": "it's"}},
+            {"id": 2, "zip": 80331, "ok": False, "d": None, "j": None}]
+    con = sqlite3.connect(":memory:")
+    con.executescript(t.write_sql(rows, table="t"))
+    got = con.execute('SELECT id, zip, typeof(zip), ok, d, j FROM "t" ORDER BY id').fetchall()
+    assert got == [(1, "01067", "text", 1, "2024-01-31", '{"a": "it\'s"}'),
+                   (2, "80331", "text", 0, None, None)]
+
+
 def test_sql_mysql_quoting_and_batching():
     rows = [{"a": i} for i in range(5)]
     out = t.write_sql(rows, table="t", dialect="mysql", batch=2)
