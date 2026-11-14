@@ -56,7 +56,7 @@ python skills/data-transform/scripts/infer_schema.py customers.csv --output summ
   id                             integer    100%     3          enum: 1 | 2 | 3
   name                           string     100%     3          enum: Anna | Ben | Clara
   zip                            string     100%     3          enum: 01067 | 10115 | 80331
-  signup                         string     67%      2          enum: 2024-03-01 | 2024-03-15
+  signup                         date       67%      2          enum: 2024-03-01 | 2024-03-15
   active                         boolean    100%     2          enum: false | true
   score                          number     67%      2          enum: 3 | 4.5
 ```

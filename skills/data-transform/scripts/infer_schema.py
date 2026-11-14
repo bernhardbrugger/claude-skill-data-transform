@@ -32,10 +32,13 @@ _NULL_VALS = frozenset([
     "None", "none", "-", "—", "nil", "NaN",
 ])
 
+# Kept in sync with transform.py, so both scripts call the same columns dates.
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _DATE_RE = [
-    re.compile(r"^\d{4}-\d{2}-\d{2}$"),
+    _ISO_DATE_RE,
     re.compile(r"^\d{2}/\d{2}/\d{4}$"),
     re.compile(r"^\d{4}/\d{2}/\d{2}$"),
+    re.compile(r"^\d{2}-\d{2}-\d{4}$"),
 ]
 
 # Numbers: no leading zeros, ASCII digits only, no nan/inf (kept in sync with transform.py)
@@ -53,6 +56,7 @@ _SQL_MAP = {
     "boolean": "BOOLEAN",
     "integer": "INTEGER",
     "number":  "REAL",
+    "date":    "DATE",
     "string":  "TEXT",
 }
 
@@ -83,11 +87,20 @@ def _classify(val: Any) -> str:
         return "integer"
     if _FLOAT_RE.match(s):
         return "number"
-    # Dates stay as "string" (JSON Schema uses format: date)
+    if any(p.match(s) for p in _DATE_RE):
+        return "date"
     return "string"
 
 
 def _promote(a: str, b: str) -> str:
+    if a == b or b == "null":
+        return a
+    if a == "null":
+        return b
+    # A date column that also holds numbers, booleans or text is text: '5' is no date
+    # (the same rule as transform.py's SQL output).
+    if "date" in (a, b):
+        return "string"
     ia = _PROMOTE.index(a) if a in _PROMOTE else len(_PROMOTE) - 1
     ib = _PROMOTE.index(b) if b in _PROMOTE else len(_PROMOTE) - 1
     return _PROMOTE[max(ia, ib)]
@@ -97,7 +110,7 @@ def _promote(a: str, b: str) -> str:
 
 class ColStats:
     __slots__ = ("count", "null_count", "_type", "uniques",
-                 "overflowed", "min_len", "max_len", "samples")
+                 "overflowed", "min_len", "max_len", "samples", "iso_dates")
 
     def __init__(self):
         self.count      : int           = 0
@@ -108,6 +121,7 @@ class ColStats:
         self.min_len    : Optional[int] = None
         self.max_len    : Optional[int] = None
         self.samples    : List[Any]     = []
+        self.iso_dates  : bool          = True
 
     def observe(self, val: Any, enum_cap: int) -> None:
         self.count += 1
@@ -117,6 +131,8 @@ class ColStats:
             return
         self._type = _promote(self._type, t)
         s = str(val)
+        if t == "date" and not _ISO_DATE_RE.match(s):
+            self.iso_dates = False
         ln = len(s)
         self.min_len = ln if self.min_len is None else min(self.min_len, ln)
         self.max_len = ln if self.max_len is None else max(self.max_len, ln)
@@ -212,11 +228,17 @@ def to_json_schema(stats: Dict[str, ColStats], enum_cap: int) -> dict:
     for col, s in stats.items():
         t    = s.inferred_type
         prop: Dict[str, Any] = {}
+        is_date = t == "date"
+        if is_date:
+            t = "string"  # JSON Schema has no date type
         if s.nullable:
             prop["type"] = [t, "null"]
         else:
             prop["type"] = t
             required.append(col)
+        if is_date and s.iso_dates:
+            # format "date" means RFC 3339 full-date (2024-01-31); other spellings are plain strings.
+            prop["format"] = "date"
         if t == "string" and s.max_len:
             prop["maxLength"] = s.max_len
         enums = s.enum_candidates(enum_cap)

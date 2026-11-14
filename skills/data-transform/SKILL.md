@@ -140,6 +140,11 @@ its own, because the script cannot look ahead.
 SQL output promotes types per column: if a column has mixed int and float values,
 the whole column becomes REAL/DOUBLE.
 
+Dates (`2024-01-31`, `01/31/2024`, `2024/01/31`, `01-31-2024`) become `DATE` in PostgreSQL and
+MySQL output (`TEXT` in SQLite), unless the column also holds other values. `infer_schema.py`
+uses the same rule: type `date` in the summary, `DATE` in its SQL, and `format: date` in the
+JSON Schema when every value is an ISO date.
+
 ## Additional Resources
 
 ### Reference Files

@@ -289,6 +289,29 @@ def test_infer_schema_agrees_with_transform_on_ids(tmp_path):
     assert "qty INTEGER" in r.stdout.replace('"', "").replace("`", "")
 
 
+def test_infer_schema_agrees_with_transform_on_dates(tmp_path):
+    # iso: ISO dates; us: other date spelling; mixed: a date column that also holds a number.
+    f = tmp_path / "d.csv"
+    f.write_text("iso,us,mixed\n2024-01-31,01/31/2024,2024-01-31\n,02/28/2024,5\n",
+                 encoding="utf-8")
+    schema = SCRIPT.with_name("infer_schema.py")
+
+    def schema_out(fmt):
+        r = subprocess.run([sys.executable, str(schema), str(f), "--output", fmt],
+                           capture_output=True, text=True, encoding="utf-8")
+        assert r.returncode == 0, r.stderr
+        return r.stdout
+
+    ddl = schema_out("sql").replace('"', "")
+    sql = run(str(f), "--to", "sql", "--dialect", "postgres").stdout.replace('"', "")
+    for col, typ in (("iso", "DATE"), ("us", "DATE"), ("mixed", "TEXT")):
+        assert f"{col} {typ}" in ddl and f"{col} {typ}" in sql
+    props = json.loads(schema_out("json-schema"))["properties"]
+    assert props["iso"]["type"] == ["string", "null"] and props["iso"]["format"] == "date"
+    assert props["us"]["type"] == "string" and "format" not in props["us"]
+    assert "format" not in props["mixed"]
+
+
 # ── input formats and the format table ─────────────────────────────────────
 
 SAMPLES = {
