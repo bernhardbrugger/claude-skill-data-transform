@@ -312,6 +312,23 @@ def test_infer_schema_agrees_with_transform_on_dates(tmp_path):
     assert "format" not in props["mixed"]
 
 
+def test_json_schema_enums_match_the_data_they_came_from(tmp_path):
+    rows = [{"n": 1, "b": True, "s": "x"}, {"n": 2, "b": False, "s": None}]
+    f = tmp_path / "d.ndjson"
+    f.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    schema = SCRIPT.with_name("infer_schema.py")
+    r = subprocess.run([sys.executable, str(schema), str(f)],
+                       capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr
+    props = json.loads(r.stdout)["properties"]
+    assert props["n"]["enum"] == [1, 2]
+    assert props["b"]["enum"] == [False, True]
+    assert props["s"]["enum"] == ["x", None]
+    for row in rows:
+        for col, value in row.items():
+            assert value in props[col]["enum"], (col, value)
+
+
 # ── input formats and the format table ─────────────────────────────────────
 
 SAMPLES = {

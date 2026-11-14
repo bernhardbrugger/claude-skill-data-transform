@@ -48,6 +48,8 @@ _FLOAT_RE = re.compile(
     re.ASCII,
 )
 
+_BOOL_WORDS = {"true": True, "yes": True, "on": True, "false": False, "no": False, "off": False}
+
 # Type promotion order: higher index = more general
 _PROMOTE = ["null", "boolean", "integer", "number", "string"]
 
@@ -79,7 +81,7 @@ def _classify(val: Any) -> str:
     if s in _NULL_VALS:
         return "null"
     lo = s.lower()
-    if lo in ("true", "false", "yes", "no", "on", "off"):
+    if lo in _BOOL_WORDS:
         return "boolean"
     # Same strict number syntax as transform.py: "01234" (ZIP codes, IDs), "1_000", "nan",
     # "inf" and non-ASCII digits are text, not numbers.
@@ -222,6 +224,23 @@ def load_rows(path: str, sample: int) -> Tuple[List[Dict], int]:
 
 # ── Output formatters ─────────────────────────────────────────────────────
 
+def _typed_enum(values: Optional[List[str]], t: str) -> Optional[List[Any]]:
+    """Enum values as JSON values of the column's type ("1" -> 1, "true" -> true).
+
+    Returns None when a value does not convert (e.g. "yes" in a column promoted to integer),
+    because an enum that the data cannot match is worse than none.
+    """
+    if not values:
+        return None
+    if t == "string":
+        return values
+    if t == "integer" and all(_INT_RE.match(v) for v in values):
+        return sorted({int(v) for v in values})
+    if t == "boolean" and all(v.lower() in _BOOL_WORDS for v in values):
+        return sorted({_BOOL_WORDS[v.lower()] for v in values})
+    return None
+
+
 def to_json_schema(stats: Dict[str, ColStats], enum_cap: int) -> dict:
     props: Dict[str, Any] = {}
     required: List[str]   = []
@@ -241,9 +260,10 @@ def to_json_schema(stats: Dict[str, ColStats], enum_cap: int) -> dict:
             prop["format"] = "date"
         if t == "string" and s.max_len:
             prop["maxLength"] = s.max_len
-        enums = s.enum_candidates(enum_cap)
-        if enums and t in ("string", "integer", "boolean"):
-            prop["enum"] = enums
+        enum = _typed_enum(s.enum_candidates(enum_cap), t)
+        if enum:
+            # enum applies to every instance, so a nullable column must list null as well.
+            prop["enum"] = enum + [None] if s.nullable else enum
         props[col] = prop
 
     schema: Dict[str, Any] = {
