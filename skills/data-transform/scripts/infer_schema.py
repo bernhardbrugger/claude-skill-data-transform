@@ -148,7 +148,12 @@ class ColStats:
         if t == "null":
             self.null_count += 1
             return
-        self._type = _promote(self._type, t)
+        if parse_text and {self._type, t} in ({"boolean", "integer"}, {"boolean", "number"}):
+            # A CSV column with "yes" and "5" is text, not a number column: transform.py keeps
+            # the original strings when a column's cells parse to different kinds.
+            self._type = "string"
+        else:
+            self._type = _promote(self._type, t)
         s = str(val)
         ln = len(s)
         self.min_len = ln if self.min_len is None else min(self.min_len, ln)

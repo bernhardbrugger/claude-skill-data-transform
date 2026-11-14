@@ -386,6 +386,33 @@ def test_json_input_keeps_its_types_in_the_schema(tmp_path):
         assert f"{col} {typ}" in ddl and f"{col} {typ}" in sql, col
 
 
+def test_csv_column_with_booleans_and_numbers_is_text_in_both_scripts(tmp_path):
+    # transform.py keeps "yes" and "5" as strings (different kinds in one column); the schema
+    # said integer, so the converted rows failed it and its CREATE TABLE disagreed.
+    f = tmp_path / "d.csv"
+    f.write_text("a,c,n\nyes,no,1\n5,2.5,2\n,,3\n", encoding="utf-8")
+    schema = SCRIPT.with_name("infer_schema.py")
+
+    def schema_out(fmt):
+        r = subprocess.run([sys.executable, str(schema), str(f), "--output", fmt],
+                           capture_output=True, text=True, encoding="utf-8")
+        assert r.returncode == 0, r.stderr
+        return r.stdout
+
+    props = json.loads(schema_out("json-schema"))["properties"]
+    converted = json.loads(run(str(f), "--to", "json").stdout)
+    assert converted[0] == {"a": "yes", "c": "no", "n": 1}
+    for row in converted:
+        for col, value in row.items():
+            assert _fits(value, props[col]["type"]), (col, value, props[col]["type"])
+            if "enum" in props[col]:
+                assert value in props[col]["enum"], (col, value)
+    ddl = schema_out("sql").replace('"', "")
+    sql = run(str(f), "--to", "sql").stdout.replace('"', "")
+    for col, typ in (("a", "TEXT"), ("c", "TEXT"), ("n", "INTEGER")):
+        assert f"{col} {typ}" in ddl and f"{col} {typ}" in sql, col
+
+
 # ── input formats and the format table ─────────────────────────────────────
 
 SAMPLES = {
