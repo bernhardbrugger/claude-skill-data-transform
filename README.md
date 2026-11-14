@@ -1,8 +1,65 @@
 # data-transform — Claude Code Skill
 
+[![CI](https://github.com/bernhardbrugger/claude-skill-data-transform/actions/workflows/ci.yml/badge.svg)](https://github.com/bernhardbrugger/claude-skill-data-transform/actions/workflows/ci.yml)
+
 **Convert data between any format with a single command.**
 
 CSV · JSON · SQL · YAML · Markdown · TOML · TSV · NDJSON
+
+---
+
+## See it work
+
+`customers.csv`:
+
+```csv
+id,name,zip,signup,active,score
+1,Anna,01067,2024-03-01,true,4.5
+2,Ben,80331,2024-03-15,false,N/A
+3,Clara,10115,,true,3
+```
+
+```bash
+python skills/data-transform/scripts/transform.py customers.csv --to sql --table customers --dialect postgres
+```
+
+```sql
+CREATE TABLE IF NOT EXISTS "customers" (
+  "id" INTEGER,
+  "name" TEXT,
+  "zip" TEXT,
+  "signup" DATE,
+  "active" BOOLEAN,
+  "score" DOUBLE PRECISION
+);
+
+
+INSERT INTO "customers" ("id", "name", "zip", "signup", "active", "score") VALUES
+  (1, 'Anna', '01067', '2024-03-01', TRUE, 4.5),
+  (2, 'Ben', '80331', '2024-03-15', FALSE, NULL),
+  (3, 'Clara', '10115', NULL, TRUE, 3);
+```
+
+The ZIP code keeps its leading zero, `N/A` and the empty cell become `NULL`, and every value is written as a literal of its column's SQL type.
+
+```bash
+python skills/data-transform/scripts/infer_schema.py customers.csv --output summary
+```
+
+```
+  File    : customers.csv
+  Rows    : 3
+  Columns : 6
+
+  Column                         Type       Fill%    Unique     Samples / Enum
+  --------------------------------------------------------------------------------
+  id                             integer    100%     3          enum: 1 | 2 | 3
+  name                           string     100%     3          enum: Anna | Ben | Clara
+  zip                            string     100%     3          enum: 01067 | 10115 | 80331
+  signup                         string     67%      2          enum: 2024-03-01 | 2024-03-15
+  active                         boolean    100%     2          enum: false | true
+  score                          number     67%      2          enum: 3 | 4.5
+```
 
 ---
 
