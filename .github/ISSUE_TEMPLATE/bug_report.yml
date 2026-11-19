@@ -1,0 +1,41 @@
+name: Bug report
+description: A wrong conversion, a crash, or SQL that does not load
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. A few rows that show the problem are enough; please remove anything private.
+  - type: textarea
+    id: input
+    attributes:
+      label: Input
+      description: The smallest input that shows the problem, and its file name (the extension picks the reader).
+      placeholder: |
+        customers.csv:
+        id,zip
+        1,01067
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command
+      placeholder: python skills/data-transform/scripts/transform.py customers.csv --to sql --dialect postgres
+    validations:
+      required: true
+  - type: textarea
+    id: expected-actual
+    attributes:
+      label: Output you got and output you expected
+      description: For SQL, name the database and paste the error it gave when loading the output. For a crash, paste the full traceback.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Python version, OS, and whether PyYAML is installed
+      placeholder: Python 3.12, Windows 11, PyYAML 6.0.2
+    validations:
+      required: true
